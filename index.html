@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>쿠팡 로켓 운영 현황</title>
+<style>
+  :root {
+    --color-fg: #1b1b18;
+    --color-fg-muted: #6b6b63;
+    --color-bg: #faf9f5;
+    --color-panel: #ffffff;
+    --color-border-line: #e5e2d9;
+    --color-ok: #2f7d4f;
+    --color-warn: #b8860b;
+    --color-bad: #b23b3b;
+    --cds-chart-muted: #9aa3af;
+    --font-anthropic-serif: Georgia, 'Noto Serif KR', serif;
+    --font-anthropic-sans: -apple-system, 'Noto Sans KR', Segoe UI, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --color-fg: #f0efe9;
+      --color-fg-muted: #a6a39a;
+      --color-bg: #1c1b19;
+      --color-panel: #26241f;
+      --color-border-line: #3a382f;
+      --cds-chart-muted: #7a8290;
+    }
+  }
+  html, body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); }
+  body { margin: 0; padding: 24px clamp(16px, 4vw, 40px) 60px; }
+  #dash-root { max-width: 1200px; margin: 0 auto; }
+
+  #dash-root { --dash-gutter: clamp(16px, 4vw, 32px); }
+  .page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: stretch; }
+  .dash-header, .kpi-row, .full-span { grid-column: 1 / -1; }
+  @media (max-width: 760px) { .page { grid-template-columns: 1fr; } }
+  .dash-header h1 { font-family: var(--font-anthropic-serif); font-weight: 400;
+    font-size: 28px; margin: 0 0 4px; }
+  .takeaway { margin: 0; color: var(--color-fg-muted); font-size: 14px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+    gap: 12px; }
+  .kpi-card { background: var(--color-panel); border: 1px solid var(--color-border-line);
+    border-radius: 10px; padding: 16px; }
+  .kpi-label { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 6px; }
+  .kpi-value { font-family: var(--font-anthropic-serif); font-weight: 400;
+    font-size: 26px; font-variant-numeric: tabular-nums; }
+  .kpi-sub { color: var(--color-fg-muted); font-size: 12px; margin-top: 2px; }
+
+  .card { background: var(--color-panel); border: 1px solid var(--color-border-line);
+    border-radius: 10px; padding: 16px;
+    display: flex; flex-direction: column; }
+  .card h2 { font-family: var(--font-anthropic-sans); font-weight: 600;
+    font-size: 16px; margin: 0 0 4px; }
+  .card .note { color: var(--color-fg-muted); font-size: 12px; margin: 0 0 10px; }
+
+  .chart-box { position: relative; width: 100%; min-height: 260px; flex: 1 1 auto; }
+  .chart-box.tall { min-height: 300px; }
+  .chart-box.xtall { min-height: 360px; }
+  .dash-skeleton { background: var(--color-border-line); border-radius: 6px; animation: dash-pulse 1.4s ease-in-out infinite; }
+  @keyframes dash-pulse { 0%,100% { opacity: .5 } 50% { opacity: .9 } }
+
+  .axis-label { fill: var(--color-fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .grid-line { stroke: var(--color-border-line); stroke-width: 1; }
+  .axis-line { stroke: var(--color-border-line); stroke-width: 1; }
+  .bar-total-label { fill: var(--color-fg); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .crosshair-line { stroke: var(--color-fg-muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px 16px; margin-top: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-fg-muted); }
+  .legend-item.muted-entry { font-style: italic; }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .legend-swatch.line { width: 12px; height: 2px; border-radius: 1px; }
+
+  .tooltip { position: absolute; pointer-events: none; background: var(--color-panel);
+    border: 1px solid var(--color-border-line); border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15); padding: 6px 10px;
+    font-size: 12px; opacity: 0; transition: opacity .1s; white-space: nowrap; z-index: 5; }
+  .tooltip .tt-head { color: var(--color-fg-muted); margin-bottom: 4px; }
+  .tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+  .tooltip .tt-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .tooltip .tt-val { font-variant-numeric: tabular-nums; font-weight: 600; margin-left: auto; padding-left: 10px; }
+
+  table#item-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #item-table th, #item-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--color-border-line); }
+  #item-table th { color: var(--color-fg-muted); font-weight: 500; font-size: 12px;
+    position: sticky; top: 0; background: var(--color-panel); }
+  #item-table td.num, #item-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .rank { color: var(--color-fg-muted); width: 1.6em; display: inline-block; }
+  .inline-bar-wrap { width: 100%; max-width: 160px; height: 8px; border-radius: 4px; background: var(--color-border-line);
+    overflow: hidden; display: inline-block; vertical-align: middle; }
+  .inline-bar-fill { height: 100%; border-radius: 4px; }
+  .table-scroll { max-height: 420px; overflow: auto; }
+  .qty-ref { color: var(--color-fg-muted); font-size: 11px; }
+
+  [data-dash-source-state="refreshing"] { opacity: .5; transition: opacity .3s; }
+  [data-dash-source-state="empty"] { color: transparent; }
+
+  footer.src-note { max-width: 1200px; margin: 24px auto 0; color: var(--color-fg-muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="dash-root">
+<div class="page">
+  <header class="dash-header">
+    <h1>쿠팡 로켓 운영 현황</h1>
+    <p class="takeaway" id="takeaway">—</p>
+  </header>
+
+  <section class="kpi-row" data-source="kpis" data-row="0">
+    <div class="kpi-card">
+      <div class="kpi-label">총 확정수량 (3~10월)</div>
+      <div class="kpi-value dash-skeleton" data-field="total_qty" id="kpi-total">&nbsp;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">총 공급가액 (3~10월)</div>
+      <div class="kpi-value dash-skeleton" data-field="total_value" id="kpi-total-value">&nbsp;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">처리 PO 건수</div>
+      <div class="kpi-value dash-skeleton" data-field="po_count" id="kpi-po">&nbsp;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">취급 품목 수</div>
+      <div class="kpi-value dash-skeleton" data-field="item_count" id="kpi-items">&nbsp;</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">3월 → 10월 증가</div>
+      <div class="kpi-value dash-skeleton" data-field="growth_label" id="kpi-growth">&nbsp;</div>
+      <div class="kpi-sub" id="kpi-growth-sub"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>월별 공급가액 추이</h2>
+    <p class="note">월별 공급가액 합계(원) · 2026년 3월~10월 · 품목별 단가 × 확정수량 기준</p>
+    <div class="chart-box tall" id="monthly-chart" data-source="monthly_totals"></div>
+  </section>
+
+  <section class="card">
+    <h2>주요 품목 월별 구성 (공급가액 기준)</h2>
+    <p class="note">누적 공급가액 상위 7개 품목 + 기타 · 월별 공급가액(원)</p>
+    <div class="chart-box tall" id="stack-chart" data-source="monthly_stack"></div>
+    <div class="legend" id="stack-legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>전체 품목 월별 공급가액 추이</h2>
+    <p class="note">22개 전 품목의 월별 공급가액(원) · 누적 상위 7개 품목은 색상 표시, 나머지는 회색 처리 (그래프에 마우스를 올리면 월별 값 확인 가능)</p>
+    <div class="chart-box xtall" id="line-chart" data-source="item_monthly_money"></div>
+    <div class="legend" id="line-legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>품목별 누적 공급가액 (3~10월 합계, 전품목)</h2>
+    <p class="note">22개 전품목 · 공급가액(원) 기준 내림차순 · 성장률은 최근 3개월(8~10월) 공급가액 기준 · 참고용으로 확정수량도 함께 표기</p>
+    <div class="table-scroll">
+      <table id="item-table" data-source="item_totals" data-row-key="sku">
+        <thead>
+          <tr>
+            <th style="width:1.6em"></th>
+            <th data-field="sku" style="width:7em">SKU</th>
+            <th data-field="name">품목명</th>
+            <th class="num" data-field="supply_value" style="width:9em">누적 공급가액</th>
+            <th class="num" data-field="share" style="width:6em">비중</th>
+            <th class="num" data-field="growth_rate" style="width:8em">최근 3개월<br>성장률</th>
+            <th class="num" data-field="qty" style="width:6em">수량</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+</div>
+<footer class="src-note">쿠팡 로켓그로스 거래명세서(2026년 3월~10월) 기반 · 데이터는 고정 스냅샷입니다.</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+// Minimal static "dash" shim: loads the two fixed CSV datasets this page
+// was built from, then supports dash.calc / dash.data / dash.onData so the
+// original dashboard script (unmodified below) runs over local files
+// instead of the live Artifact store.
+window.dash = (function () {
+  const DATASET_FILES = { raw: 'dash_raw.csv', price: 'dash_price.csv' };
+  const colors = ['#c15f3c', '#5b7f9e', '#8a9a5b', '#b08a3e', '#6b5b95', '#a65d6d', '#4f8a7c', '#9a7b4f'];
+  const rawData = {};
+  const calcs = {};
+  const calcCache = {};
+  const listeners = [];
+  let ready = false;
+
+  function num(v) { const n = Number(v); return Number.isFinite(n) ? n : v; }
+  function coerceRow(row) {
+    const out = {};
+    for (const k in row) {
+      const v = row[k];
+      out[k] = (v !== '' && /^-?\d+(\.\d+)?$/.test(v)) ? num(v) : v;
+    }
+    return out;
+  }
+
+  function resolve(id) {
+    if (id in rawData) return rawData[id];
+    if (id in calcCache) return calcCache[id];
+    if (calcs[id]) {
+      const spec = calcs[id];
+      const args = spec.inputs.map((dep) => resolve(dep));
+      const result = spec.fn(...args);
+      calcCache[id] = result;
+      return result;
+    }
+    return undefined;
+  }
+
+  function fireAll() {
+    listeners.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
+  }
+
+  Promise.all(
+    Object.entries(DATASET_FILES).map(([id, file]) =>
+      d3.csv(file).then((rows) => { rawData[id] = rows.map(coerceRow); })
+    )
+  ).then(() => {
+    ready = true;
+    fireAll();
+  }).catch((err) => {
+    console.error('dash: failed to load dataset CSVs', err);
+  });
+
+  return {
+    colors,
+    calc(id, { inputs, fn }) { calcs[id] = { inputs, fn }; },
+    data(id) {
+      if (!ready) return { status: 'loading', data: [] };
+      const data = resolve(id);
+      return { status: data === undefined ? 'missing' : 'ok', data: data || [] };
+    },
+    onData(fn) {
+      listeners.push(fn);
+      if (ready) fn();
+    },
+    refresh() {},
+    params() { return {}; },
+    setParams() {},
+    resetParams() {},
+    setLink() {},
+  };
+})();
+</script>
+<script>
+(function () {
+  const fmt = d3.format(',');
+  const fmtWon = (n) => fmt(Math.round(n || 0)) + '원';
+  const fmtCompact = (n) => new Intl.NumberFormat('ko', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  const monthLabel = (m) => { const [, mm] = m.split('-'); return `${parseInt(mm, 10)}월`; };
+
+  // ---- calcs (derived from the raw + price datasets; every number on this page traces back to them) ----
+  dash.calc('priced', {
+    title: '행별 공급가액',
+    description: 'raw(확정수량)와 price(SKU별 단가)를 SKU로 결합해 행별 공급가액(확정수량×단가)을 계산.',
+    inputs: ['raw', 'price'],
+    fn: (raw, price) => {
+      const priceMap = new Map(price.map((d) => [d.sku, +d.unit_price]));
+      return raw.map((d) => {
+        const unit_price = priceMap.has(d.sku) ? priceMap.get(d.sku) : null;
+        const supply_value = unit_price != null ? +d.qty * unit_price : null;
+        return { ...d, unit_price, supply_value };
+      });
+    },
+  });
+
+  dash.calc('monthly_totals', {
+    title: '월별 공급가액 합계',
+    description: 'priced의 month별 supply_value 합계.',
+    inputs: ['priced'],
+    fn: (priced) => {
+      const byMonth = d3.rollup(priced, (v) => d3.sum(v, (d) => d.supply_value || 0), (d) => d.month);
+      return Array.from(byMonth, ([month, supply_value]) => ({ month, supply_value }))
+        .sort((a, b) => a.month.localeCompare(b.month));
+    },
+  });
+
+  // 사용자가 지정한 내부 품목명(우리 기준) — 지정되지 않은 품목은 원본 품목명을 그대로 사용.
+  const NAME_OVERRIDES = {
+    '50043479': '황토흙',
+    '50260471': '백 20-30',
+    '50260723': '자연바크',
+    '50730402': '흑 20-30',
+    '67173133': '코코피트 5L',
+    '67173170': '코코칩 5L',
+    '61575330': '코코칩 57L',
+    '69251199': '보석 1L',
+    '69645404': '무균 1L',
+    '70585825': '백 50-70',
+    '70585894': '핑크 콩',
+    '70586225': '백 콩',
+    '70600612': '핑 20-30',
+    '70842835': '백 네트',
+    '71239809': '세마 1L',
+    '71587887': '핑 네트',
+    '72060263': '내 네트',
+    '73212758': '세마 소(반)',
+    '73715843': '세마 대(반)',
+    '73715909': '세마 중(반)',
+    '79031313': '송이 레드 1L',
+    '79031758': '송이 블랙 1L',
+  };
+
+  dash.calc('item_totals', {
+    title: '품목별 누적 공급가액',
+    description: 'priced의 sku/name별 supply_value 합계와 비중(금액 기준), 참고용 수량, 최근 3개월 성장률(공급가액 기준). 품목명은 사용자가 지정한 내부 명칭(NAME_OVERRIDES)으로 표시, 공급가액 내림차순. 최근 3개월 성장률 = 최근 3개월(예: 8~10월) 중 공급가액이 처음 발생한 달부터 마지막 달까지의 기하평균 월간 성장률 — (마지막달값/시작달값)^(1/경과월수)-1. 최근 3개월 중 유효 구간이 1개월 이하면 산출 불가로 "—" 표시.',
+    inputs: ['priced'],
+    fn: (priced) => {
+      const total = d3.sum(priced, (d) => d.supply_value || 0);
+      const months = Array.from(new Set(priced.map((d) => d.month))).sort();
+      const recentMonths = months.slice(-3);
+      const bySku = d3.rollup(
+        priced,
+        (v) => ({
+          name: v[0].name,
+          qty: d3.sum(v, (d) => +d.qty),
+          supply_value: d3.sum(v, (d) => d.supply_value || 0),
+          byMonth: d3.rollup(v, (vv) => d3.sum(vv, (d) => d.supply_value || 0), (d) => d.month),
+        }),
+        (d) => d.sku
+      );
+      const rows = Array.from(bySku, ([sku, r]) => {
+        const series = recentMonths.map((m) => r.byMonth.get(m) || 0);
+        const firstIdx = series.findIndex((v) => v > 0);
+        const lastIdx = series.length - 1;
+        let growth_rate = null;
+        if (firstIdx >= 0 && lastIdx > firstIdx) {
+          const start = series[firstIdx], end = series[lastIdx];
+          const n = lastIdx - firstIdx;
+          growth_rate = Math.pow(end / start, 1 / n) - 1;
+        }
+        return {
+          sku, name: NAME_OVERRIDES[sku] || r.name, qty: r.qty, supply_value: r.supply_value,
+          share: total ? r.supply_value / total : 0,
+          growth_rate,
+        };
+      });
+      rows.sort((a, b) => b.supply_value - a.supply_value);
+      return rows;
+    },
+  });
+
+  dash.calc('monthly_stack', {
+    title: '월별 품목 구성 (공급가액, 상위 7 + 기타)',
+    description: 'item_totals(공급가액 기준) 상위 7개 품목을 월별로 펼치고 나머지는 기타로 합산. 공급가액(value)과 확정수량(qty)을 함께 집계.',
+    inputs: ['priced', 'item_totals'],
+    fn: (priced, itemTotals) => {
+      const topSkus = itemTotals.slice(0, 7).map((d) => d.sku);
+      const nameOf = new Map(itemTotals.map((d) => [d.sku, d.name]));
+      const months = Array.from(new Set(priced.map((d) => d.month))).sort();
+      const rows = [];
+      months.forEach((month) => {
+        const monthRows = priced.filter((d) => d.month === month);
+        topSkus.forEach((sku) => {
+          const skuRows = monthRows.filter((d) => d.sku === sku);
+          const value = d3.sum(skuRows, (d) => d.supply_value || 0);
+          const qty = d3.sum(skuRows, (d) => +d.qty);
+          rows.push({ month, series: sku, label: nameOf.get(sku), value, qty });
+        });
+        const topRows = monthRows.filter((d) => topSkus.includes(d.sku));
+        const topValue = d3.sum(topRows, (d) => d.supply_value || 0);
+        const topQty = d3.sum(topRows, (d) => +d.qty);
+        const totalValue = d3.sum(monthRows, (d) => d.supply_value || 0);
+        const totalQty = d3.sum(monthRows, (d) => +d.qty);
+        rows.push({ month, series: '__other__', label: '기타', value: totalValue - topValue, qty: totalQty - topQty });
+      });
+      return rows;
+    },
+  });
+
+  dash.calc('item_monthly_money', {
+    title: '전체 품목 월별 공급가액',
+    description: 'priced를 품목(SKU)×월별로 집계한 공급가액(values)·확정수량(qtyValues) 매트릭스. item_totals(공급가액 내림차순) 순서를 그대로 따름 — 모든 품목 포함.',
+    inputs: ['priced', 'item_totals'],
+    fn: (priced, itemTotals) => {
+      const months = Array.from(new Set(priced.map((d) => d.month))).sort();
+      const nameOf = new Map(itemTotals.map((d) => [d.sku, d.name]));
+      return itemTotals.map(({ sku }) => {
+        const skuRows = priced.filter((d) => d.sku === sku);
+        return {
+          sku,
+          name: nameOf.get(sku),
+          months,
+          values: months.map((m) => d3.sum(skuRows.filter((d) => d.month === m), (d) => d.supply_value || 0)),
+          qtyValues: months.map((m) => d3.sum(skuRows.filter((d) => d.month === m), (d) => +d.qty)),
+        };
+      });
+    },
+  });
+
+  dash.calc('kpis', {
+    title: '핵심 지표',
+    description: 'raw 전체로부터 총 확정수량, PO 건수, 품목 수 계산. total_value는 priced 전체 공급가액(원) 합계. 증가배수는 priced의 월별 공급가액(원) 기준 3월 대비 10월 증가.',
+    inputs: ['raw', 'priced'],
+    fn: (raw, priced) => {
+      const total_qty = d3.sum(raw, (d) => +d.qty);
+      const total_value = d3.sum(priced, (d) => d.supply_value || 0);
+      const po_count = new Set(raw.map((d) => d.po)).size;
+      const item_count = new Set(raw.map((d) => d.sku)).size;
+      const byMonthValue = d3.rollup(priced, (v) => d3.sum(v, (d) => d.supply_value || 0), (d) => d.month);
+      const months = Array.from(byMonthValue.keys()).sort();
+      const first = months[0], last = months[months.length - 1];
+      const firstValue = byMonthValue.get(first) || 0, lastValue = byMonthValue.get(last) || 0;
+      const growth = firstValue ? lastValue / firstValue : null;
+      return [{
+        total_qty, total_value, po_count, item_count,
+        growth_label: growth ? `${growth.toFixed(1)}배` : '—',
+        first_month: first, last_month: last, first_value: firstValue, last_value: lastValue,
+      }];
+    },
+  });
+
+  // ---- tooltip ----
+  function tip(container) {
+    if (!container.querySelector('.tooltip')) {
+      const el = document.createElement('div');
+      el.className = 'tooltip';
+      container.style.position = 'relative';
+      container.appendChild(el);
+    }
+    return container.querySelector('.tooltip');
+  }
+  function showTip(el, x, y, html) {
+    el.innerHTML = html;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.opacity = 1;
+  }
+  function hideTip(el) { el.style.opacity = 0; }
+
+  // ---- KPI render ----
+  function renderKpis() {
+    const r = dash.data('kpis');
+    const box = document.querySelector('.kpi-row');
+    if (r.status !== 'ok') return;
+    const row = r.data[0] || {};
+    document.getElementById('kpi-total').textContent = fmt(row.total_qty || 0) + '개';
+    document.getElementById('kpi-total-value').textContent = fmtWon(row.total_value || 0);
+    document.getElementById('kpi-po').textContent = fmt(row.po_count || 0) + '건';
+    document.getElementById('kpi-items').textContent = fmt(row.item_count || 0) + '종';
+    document.getElementById('kpi-growth').textContent = row.growth_label || '—';
+    document.getElementById('kpi-growth-sub').textContent =
+      row.first_month ? `${monthLabel(row.first_month)} ${fmtWon(row.first_value)} → ${monthLabel(row.last_month)} ${fmtWon(row.last_value)}` : '';
+    box.querySelectorAll('.dash-skeleton').forEach((el) => el.classList.remove('dash-skeleton'));
+    document.getElementById('takeaway').textContent =
+      `3월 ${fmtWon(row.first_value)}에서 10월 ${fmtWon(row.last_value)}로 ${row.growth_label} 늘었습니다 (총 공급가액 ${fmtWon(row.total_value)}, PO ${fmt(row.po_count)}건, 품목 ${fmt(row.item_count)}종 기준).`;
+  }
+
+  // ---- monthly bar chart (공급가액) ----
+  function renderMonthlyChart() {
+    const container = document.getElementById('monthly-chart');
+    const r = dash.data('monthly_totals');
+    if (r.status !== 'ok') {
+      if (r.status === 'loading') { container.classList.add('dash-skeleton'); container.innerHTML = ''; }
+      return;
+    }
+    container.classList.remove('dash-skeleton');
+    const rows = r.data;
+    const width = container.clientWidth || 600;
+    const height = 300;
+    const margin = { top: 16, right: 16, bottom: 28, left: 52 };
+
+    container.innerHTML = '';
+    const svg = d3.select(container).append('svg')
+      .attr('width', '100%').attr('height', height)
+      .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const x = d3.scaleBand().domain(rows.map((d) => d.month)).range([margin.left, width - margin.right]).padding(0.3);
+    const y = d3.scaleLinear().domain([0, d3.max(rows, (d) => d.supply_value) * 1.1]).nice().range([height - margin.bottom, margin.top]);
+
+    const yTicks = y.ticks(4);
+    svg.append('g').selectAll('line').data(yTicks).join('line')
+      .attr('class', 'grid-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', (d) => y(d)).attr('y2', (d) => y(d));
+    svg.append('g').selectAll('text').data(yTicks).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'end')
+      .attr('x', margin.left - 8).attr('y', (d) => y(d) + 4)
+      .text((d) => fmtCompact(d));
+
+    svg.append('line').attr('class', 'axis-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', height - margin.bottom).attr('y2', height - margin.bottom);
+
+    svg.append('g').selectAll('text').data(rows).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'middle')
+      .attr('x', (d) => x(d.month) + x.bandwidth() / 2).attr('y', height - 8)
+      .text((d) => monthLabel(d.month));
+
+    const accent = dash.colors[0];
+    const tt = tip(container);
+
+    svg.append('g').selectAll('rect').data(rows).join('rect')
+      .attr('x', (d) => x(d.month)).attr('width', x.bandwidth())
+      .attr('y', (d) => y(d.supply_value)).attr('height', (d) => y(0) - y(d.supply_value))
+      .attr('rx', 4).attr('fill', accent)
+      .on('mousemove', function (event, d) {
+        const [mx, my] = d3.pointer(event, container);
+        showTip(tt, mx + 10, my - 10,
+          `<div class="tt-head">${monthLabel(d.month)} ${d.month}</div>` +
+          `<div class="tt-row"><span class="tt-swatch" style="background:${accent}"></span>공급가액<span class="tt-val">${fmtWon(d.supply_value)}</span></div>`);
+      })
+      .on('mouseleave', () => hideTip(tt));
+  }
+
+  // ---- stacked chart (공급가액) ----
+  function renderStackChart() {
+    const container = document.getElementById('stack-chart');
+    const legendBox = document.getElementById('stack-legend');
+    const r = dash.data('monthly_stack');
+    if (r.status !== 'ok') {
+      if (r.status === 'loading') { container.classList.add('dash-skeleton'); container.innerHTML = ''; }
+      return;
+    }
+    container.classList.remove('dash-skeleton');
+    const rows = r.data;
+    const months = Array.from(new Set(rows.map((d) => d.month))).sort();
+    const seriesOrder = Array.from(new Set(rows.map((d) => d.series)));
+    const labelOf = new Map(rows.map((d) => [d.series, d.label]));
+
+    const bySeries = new Map(seriesOrder.map((s) => [s, months.map((m) => {
+      const hit = rows.find((d) => d.month === m && d.series === s);
+      return hit ? hit.value : 0;
+    })]));
+    const qtyBySeries = new Map(seriesOrder.map((s) => [s, months.map((m) => {
+      const hit = rows.find((d) => d.month === m && d.series === s);
+      return hit ? hit.qty : 0;
+    })]));
+
+    const width = container.clientWidth || 600;
+    const height = 300;
+    const margin = { top: 16, right: 16, bottom: 28, left: 52 };
+
+    container.innerHTML = '';
+    const svg = d3.select(container).append('svg')
+      .attr('width', '100%').attr('height', height)
+      .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const totals = months.map((m, i) => d3.sum(seriesOrder, (s) => bySeries.get(s)[i]));
+    const x = d3.scaleBand().domain(months).range([margin.left, width - margin.right]).padding(0.3);
+    const y = d3.scaleLinear().domain([0, d3.max(totals) * 1.08]).nice().range([height - margin.bottom, margin.top]);
+
+    const yTicks = y.ticks(4);
+    svg.append('g').selectAll('line').data(yTicks).join('line')
+      .attr('class', 'grid-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', (d) => y(d)).attr('y2', (d) => y(d));
+    svg.append('g').selectAll('text').data(yTicks).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'end')
+      .attr('x', margin.left - 8).attr('y', (d) => y(d) + 4)
+      .text((d) => fmtCompact(d));
+    svg.append('line').attr('class', 'axis-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', height - margin.bottom).attr('y2', height - margin.bottom);
+    svg.append('g').selectAll('text').data(months).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'middle')
+      .attr('x', (d) => x(d) + x.bandwidth() / 2).attr('y', height - 8)
+      .text((d) => monthLabel(d));
+
+    const colorOf = new Map(seriesOrder.map((s, i) => [s, s === '__other__' ? 'var(--cds-chart-muted, #9aa3af)' : dash.colors[i]]));
+    const tt = tip(container);
+
+    const stackData = months.map((m, mi) => {
+      let acc = 0;
+      return seriesOrder.map((s) => {
+        const v = bySeries.get(s)[mi];
+        const qty = qtyBySeries.get(s)[mi];
+        const y0 = acc; acc += v;
+        return { month: m, series: s, label: labelOf.get(s), value: v, qty, y0, y1: acc };
+      });
+    });
+
+    stackData.forEach((segs) => {
+      svg.append('g').selectAll('rect').data(segs.filter((d) => d.value > 0)).join('rect')
+        .attr('x', (d) => x(d.month)).attr('width', x.bandwidth())
+        .attr('y', (d) => y(d.y1)).attr('height', (d) => Math.max(0, y(d.y0) - y(d.y1)))
+        .attr('fill', (d) => colorOf.get(d.series))
+        .attr('stroke', 'var(--color-panel)').attr('stroke-width', 2)
+        .on('mousemove', function (event, d) {
+          const [mx, my] = d3.pointer(event, container);
+          showTip(tt, mx + 10, my - 10,
+            `<div class="tt-head">${monthLabel(d.month)} ${d.month}</div>` +
+            `<div class="tt-row"><span class="tt-swatch" style="background:${colorOf.get(d.series)}"></span>${d.label}<span class="tt-val">${fmtWon(d.value)} · ${fmt(d.qty)}개</span></div>`);
+        })
+        .on('mouseleave', () => hideTip(tt));
+    });
+
+    legendBox.innerHTML = '';
+    seriesOrder.forEach((s) => {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<span class="legend-swatch" style="background:${colorOf.get(s)}"></span>${labelOf.get(s)}`;
+      legendBox.appendChild(item);
+    });
+  }
+
+  // ---- all-items monthly line chart (공급가액) ----
+  function renderLineChart() {
+    const container = document.getElementById('line-chart');
+    const legendBox = document.getElementById('line-legend');
+    const r = dash.data('item_monthly_money');
+    if (r.status !== 'ok') {
+      if (r.status === 'loading') { container.classList.add('dash-skeleton'); container.innerHTML = ''; }
+      return;
+    }
+    container.classList.remove('dash-skeleton');
+    const items = r.data; // already sorted by cumulative supply_value desc
+    const months = items[0] ? items[0].months : [];
+    const TOP_N = 7;
+    const topItems = items.slice(0, TOP_N);
+    const restItems = items.slice(TOP_N);
+
+    const width = container.clientWidth || 600;
+    const height = 340;
+    const margin = { top: 16, right: 16, bottom: 28, left: 52 };
+
+    container.innerHTML = '';
+    const svg = d3.select(container).append('svg')
+      .attr('width', '100%').attr('height', height)
+      .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const allVals = items.flatMap((d) => d.values);
+    const x = d3.scalePoint().domain(months).range([margin.left, width - margin.right]).padding(0.02);
+    const y = d3.scaleLinear().domain([0, (d3.max(allVals) || 1) * 1.1]).nice().range([height - margin.bottom, margin.top]);
+
+    const yTicks = y.ticks(5);
+    svg.append('g').selectAll('line').data(yTicks).join('line')
+      .attr('class', 'grid-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', (d) => y(d)).attr('y2', (d) => y(d));
+    svg.append('g').selectAll('text').data(yTicks).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'end')
+      .attr('x', margin.left - 8).attr('y', (d) => y(d) + 4)
+      .text((d) => fmtCompact(d));
+    svg.append('line').attr('class', 'axis-line')
+      .attr('x1', margin.left).attr('x2', width - margin.right)
+      .attr('y1', height - margin.bottom).attr('y2', height - margin.bottom);
+    svg.append('g').selectAll('text').data(months).join('text')
+      .attr('class', 'axis-label').attr('text-anchor', 'middle')
+      .attr('x', (d) => x(d)).attr('y', height - 8)
+      .text((d) => monthLabel(d));
+
+    const colorOf = new Map(topItems.map((d, i) => [d.sku, dash.colors[i]]));
+    const mutedColor = 'var(--cds-chart-muted, #9aa3af)';
+    const lineGen = d3.line()
+      .x((_, i) => x(months[i]))
+      .y((v) => y(v));
+
+    const plot = svg.append('g');
+
+    // muted (long-tail) lines first, underneath
+    plot.append('g').selectAll('path').data(restItems).join('path')
+      .attr('fill', 'none').attr('stroke', mutedColor).attr('stroke-width', 1.3).attr('opacity', 0.45)
+      .attr('d', (d) => lineGen(d.values));
+
+    // top-7 colored lines on top
+    plot.append('g').selectAll('path').data(topItems).join('path')
+      .attr('fill', 'none').attr('stroke', (d) => colorOf.get(d.sku)).attr('stroke-width', 2.2)
+      .attr('d', (d) => lineGen(d.values));
+
+    // markers for top-7 at each month
+    topItems.forEach((d) => {
+      plot.append('g').selectAll('circle').data(d.values).join('circle')
+        .attr('cx', (_, i) => x(months[i])).attr('cy', (v) => y(v)).attr('r', 3.5)
+        .attr('fill', colorOf.get(d.sku)).attr('stroke', 'var(--color-panel)').attr('stroke-width', 1);
+    });
+
+    // crosshair + combined tooltip (hover anywhere on the chart)
+    const crosshair = svg.append('line').attr('class', 'crosshair-line')
+      .attr('y1', margin.top).attr('y2', height - margin.bottom).attr('opacity', 0);
+    const tt = tip(container);
+    const otherTotal = (mi) => d3.sum(restItems, (d) => d.values[mi]);
+    const otherQtyTotal = (mi) => d3.sum(restItems, (d) => d.qtyValues[mi]);
+
+    svg.append('rect')
+      .attr('x', margin.left).attr('y', margin.top)
+      .attr('width', Math.max(0, width - margin.left - margin.right)).attr('height', Math.max(0, height - margin.top - margin.bottom))
+      .attr('fill', 'transparent')
+      .on('mousemove', function (event) {
+        const [mx, my] = d3.pointer(event, container);
+        const [mxSvg] = d3.pointer(event, svg.node());
+        let closest = 0, closestDist = Infinity;
+        months.forEach((m, i) => {
+          const dist = Math.abs(x(m) - mxSvg);
+          if (dist < closestDist) { closestDist = dist; closest = i; }
+        });
+        crosshair.attr('x1', x(months[closest])).attr('x2', x(months[closest])).attr('opacity', 1);
+        const rowsHtml = topItems.map((d) =>
+          `<div class="tt-row"><span class="tt-swatch" style="background:${colorOf.get(d.sku)}"></span>${d.name}<span class="tt-val">${fmtWon(d.values[closest])} · ${fmt(d.qtyValues[closest])}개</span></div>`
+        ).join('');
+        const otherHtml = restItems.length
+          ? `<div class="tt-row"><span class="tt-swatch" style="background:${mutedColor}"></span>기타 ${restItems.length}개 품목<span class="tt-val">${fmtWon(otherTotal(closest))} · ${fmt(otherQtyTotal(closest))}개</span></div>`
+          : '';
+        showTip(tt, mx + 10, my - 10, `<div class="tt-head">${monthLabel(months[closest])} ${months[closest]}</div>${rowsHtml}${otherHtml}`);
+      })
+      .on('mouseleave', () => { hideTip(tt); crosshair.attr('opacity', 0); });
+
+    legendBox.innerHTML = '';
+    topItems.forEach((d) => {
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<span class="legend-swatch line" style="background:${colorOf.get(d.sku)}"></span>${d.name}`;
+      legendBox.appendChild(item);
+    });
+    if (restItems.length) {
+      const item = document.createElement('div');
+      item.className = 'legend-item muted-entry';
+      item.innerHTML = `<span class="legend-swatch line" style="background:${mutedColor}"></span>기타 ${restItems.length}개 품목 (회색, 그래프에 마우스오버하면 개별 값 확인)`;
+      legendBox.appendChild(item);
+    }
+  }
+
+  // ---- item table (공급가액 기준) ----
+  function renderTable() {
+    const r = dash.data('item_totals');
+    const tbody = document.querySelector('#item-table tbody');
+    if (r.status !== 'ok') return;
+    const rows = r.data;
+    tbody.innerHTML = '';
+    rows.forEach((d, i) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = d.sku;
+      tr.innerHTML =
+        `<td class="rank">${i + 1}</td>` +
+        `<td>${d.sku}</td>` +
+        `<td>${d.name}</td>` +
+        `<td class="num">${fmtWon(d.supply_value)}</td>` +
+        `<td class="num">${(d.share * 100).toFixed(1)}%</td>` +
+        `<td class="num">${d.growth_rate == null ? '—' : (d.growth_rate >= 0 ? '+' : '') + (d.growth_rate * 100).toFixed(1) + '%'}</td>` +
+        `<td class="num qty-ref">${fmt(d.qty)}개</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  dash.onData(() => {
+    renderKpis();
+    renderMonthlyChart();
+    renderStackChart();
+    renderLineChart();
+    renderTable();
+  });
+
+  window.addEventListener('resize', () => { renderMonthlyChart(); renderStackChart(); renderLineChart(); });
+})();
+</script>
+</body>
+</html>
